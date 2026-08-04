@@ -250,4 +250,79 @@ function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
 }
 
-export const powerDefs: ComponentDef[] = [battery, solar];
+// ── Distribution blocks ──────────────────────────────────────────────────────
+/**
+ * Power and Ground are bare distribution blocks: 12 sockets — 2 across, 6 down,
+ * so the block stands upright — all joined to the same node inside. Run a single
+ * wire from the battery to one socket and the other eleven carry it too, which
+ * keeps the whole board off the battery's single pair of terminals.
+ *
+ * Deliberately featureless: the green box and its sockets are the whole part,
+ * so there is nothing between them to read as a component of its own.
+ */
+const BUS_COLS = 2;
+const BUS_ROWS = 6;
+const BUS_STEP_X = 24;
+const BUS_STEP_Y = 22;
+const BUS_PAD = 22;
+const BUS_W = BUS_PAD * 2 + (BUS_COLS - 1) * BUS_STEP_X; // 68
+const BUS_TOP = 36; // first row, clear of the title
+const BUS_H = BUS_TOP + (BUS_ROWS - 1) * BUS_STEP_Y + 16; // 162 — tall and narrow
+
+const busX = (i: number) => BUS_PAD + i * BUS_STEP_X;
+const busY = (r: number) => BUS_TOP + r * BUS_STEP_Y;
+
+function busPins(prefix: string, color: string): PinDef[] {
+  const pins: PinDef[] = [];
+  for (let r = 0; r < BUS_ROWS; r++) {
+    for (let i = 0; i < BUS_COLS; i++) {
+      pins.push({
+        id: `${prefix}${r * BUS_COLS + i + 1}`,
+        role: "inout",
+        x: busX(i),
+        y: busY(r),
+        color,
+      });
+    }
+  }
+  return pins;
+}
+
+/** Every socket on a block is the same node — chain the whole array together. */
+function busLinks(pins: PinDef[]): [string, string][] {
+  return pins.slice(1).map((p, i) => [pins[i].id, p.id] as [string, string]);
+}
+
+const posBusPins = busPins("p", SOCKET.pos);
+const negBusPins = busPins("n", SOCKET.neg);
+
+const powerBus: ComponentDef = {
+  id: "bus-pos",
+  name: "Power",
+  short: "POWER",
+  category: "power",
+  description:
+    "12 red + sockets (2 across, 6 down), all joined together. Run one red wire from the battery's + terminal to any socket and the other eleven are live too — so every part takes its + from here instead of everything piling into the battery.",
+  w: BUS_W,
+  h: BUS_H,
+  pins: posBusPins,
+  conductor: () => busLinks(posBusPins),
+  // nothing to draw: the green box and its sockets are the whole part
+  draw: () => {},
+};
+
+const groundBus: ComponentDef = {
+  id: "bus-neg",
+  name: "Ground",
+  short: "GROUND",
+  category: "power",
+  description:
+    "12 black − sockets (2 across, 6 down), all joined together. Run one black wire from the battery's − terminal to any socket and the whole block becomes ground — so every part takes its − from here instead of everything piling into the battery.",
+  w: BUS_W,
+  h: BUS_H,
+  pins: negBusPins,
+  conductor: () => busLinks(negBusPins),
+  draw: () => {},
+};
+
+export const powerDefs: ComponentDef[] = [battery, solar, powerBus, groundBus];

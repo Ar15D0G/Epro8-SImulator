@@ -559,5 +559,103 @@ function fmtList(bad: string[]): string {
     }));
 }
 
+// 13. Power / Ground blocks: one wire from the battery feeds the whole block
+{
+  const doc = emptyDoc(); const sim = new Simulator();
+  const bat = place(doc, "battery");
+  const pos = place(doc, "bus-pos");
+  const neg = place(doc, "bus-neg");
+  // a single wire per rail — everything else hangs off the blocks
+  wire(doc, bat, "p1", pos, "p1");
+  wire(doc, bat, "n1", neg, "n12");
+  const led = place(doc, "light");
+  const sw = place(doc, "switch");
+  wire(doc, pos, "p9", sw, "a");
+  wire(doc, sw, "b", led, "p");
+  wire(doc, led, "n", neg, "n4");
+  const lit = () => (led.state!.on as number) > 0.5;
+
+  run(doc, sim);
+  check("Blocks: nothing lit while the switch is open", !lit());
+  sw.state!.closed = true;
+  run(doc, sim);
+  check("Blocks: a part fed from the blocks lights up", lit());
+
+  // every socket is the same node, wherever the battery wire happened to land
+  check("Blocks: all 12 Power sockets are live from one battery wire",
+    getDef("bus-pos")!.pins.every((p) => sim.energizedAt(pos.id, p.id) > 0.5));
+  check("Blocks: all 12 Ground sockets ground from one battery wire",
+    getDef("bus-neg")!.pins.every((p) => sim.groundedAt(neg.id, p.id)));
+
+  bat.state!.on = false;
+  run(doc, sim);
+  check("Blocks: they go dead with the battery",
+    !lit() && sim.energizedAt(pos.id, "p4") < 0.5);
+  bat.state!.on = true;
+  run(doc, sim);
+  check("Blocks: power comes back with the battery", lit());
+
+  // purely passive — a block must never invent a supply of its own
+  doc.wires = doc.wires.filter((w) => w.a.comp !== bat.id && w.b.comp !== bat.id);
+  run(doc, sim);
+  check("Blocks: an unfed block powers nothing", !lit());
+}
+
+// 13b. both blocks are a bare upright 2 × 6 array of one colour
+{
+  for (const [id, name, color] of [
+    ["bus-pos", "Power", "#e23b3b"],
+    ["bus-neg", "Ground", "#15181d"],
+  ] as const) {
+    const def = getDef(id)!;
+    check(`${name}: named just "${name}"`, def.name === name);
+    check(`${name}: 12 sockets`, def.pins.length === 12);
+    check(`${name}: every socket is the same colour`, def.pins.every((p) => p.color === color));
+    check(`${name}: laid out 2 across, 6 down`,
+      new Set(def.pins.map((p) => p.x)).size === 2 && new Set(def.pins.map((p) => p.y)).size === 6);
+    check(`${name}: stands upright by default`, def.h > def.w);
+    // bare wiring block: no readouts, no settings, no behaviour of its own
+    check(`${name}: inert — nothing but the box and its sockets`,
+      !def.props && !def.init && !def.evaluate && !def.tick && !def.source && !def.interact);
+  }
+}
+
+// 14. Sequencer: switching the power off resets it to step 1
+{
+  const doc = emptyDoc(); const sim = new Simulator();
+  const bat = place(doc, "battery");
+  const seq = place(doc, "sequence");
+  power(doc, bat, seq);
+  const trig = place(doc, "switch");
+  wire(doc, bat, "p1", trig, "a");
+  wire(doc, trig, "b", seq, "t3");
+
+  run(doc, sim);
+  check("Sequencer starts on step 1", seq.state!.idx === 0);
+  trig.state!.closed = true;
+  run(doc, sim);
+  check("Sequencer advances to the triggered step", seq.state!.idx === 2);
+  trig.state!.closed = false;
+  run(doc, sim);
+  check("Sequencer holds its step once the trigger clears", seq.state!.idx === 2);
+
+  // rewiring elsewhere rebuilds every net — that must not read as a power cut
+  const spare = place(doc, "switch");
+  wire(doc, bat, "p1", spare, "a");
+  for (const closed of [true, false, true]) {
+    spare.state!.closed = closed;
+    run(doc, sim);
+  }
+  check("Sequencer ignores unrelated switching on the board", seq.state!.idx === 2);
+
+  bat.state!.on = false;
+  run(doc, sim);
+  check("Sequencer resets when the battery is switched off", seq.state!.idx === 0);
+  bat.state!.on = true;
+  run(doc, sim);
+  check("Sequencer comes back on step 1, not where it left off", seq.state!.idx === 0);
+  check("Step 1 drives its output again after the reset", sim.energizedAt(seq.id, "s1") > 0.5);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

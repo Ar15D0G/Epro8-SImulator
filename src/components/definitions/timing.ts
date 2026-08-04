@@ -166,13 +166,27 @@ const sequence: ComponentDef = {
   short: "SEQUENCE",
   category: "timing",
   description:
-    "4-step sequencer. Left = triggers (plug a button/signal in), right = step outputs (drive a motor etc.). Step 1 runs at power-up; signalling a trigger switches to that step and stops the previous step's action. Needs + / − power.",
+    "4-step sequencer. Left = triggers (plug a button/signal in), right = step outputs (drive a motor etc.). Step 1 runs at power-up; signalling a trigger switches to that step and stops the previous step's action. Switching the power off resets it back to step 1. Needs + / − power.",
   w: SEQ_W,
   h: SEQ_H,
   pins: seqPins,
-  init: () => ({ idx: 0, _t1: false, _t2: false, _t3: false, _t4: false }),
+  init: () => ({ idx: 0, _pwr: false, _t1: false, _t2: false, _t3: false, _t4: false }),
   tick: (c) => {
-    if (!powered(c)) return;
+    // Losing power resets the run — switch the battery off and back on and the
+    // box starts from step 1 again rather than resuming where it left off.
+    //
+    // `_pwr` is what `evaluate` settled on last frame, not a fresh reading:
+    // `tick` only ever sees the *previous* frame's energisation, which reads as
+    // nothing at all for one frame whenever the nets are rebuilt around it (any
+    // switch on the board flipping does that). Latching the settled answer keeps
+    // a reset meaning a real power cut rather than a wiring change elsewhere.
+    const wasPowered = c.state._pwr as boolean;
+    c.state._pwr = false; // `evaluate` re-latches it once this frame settles
+    if (!wasPowered) {
+      c.state.idx = 0;
+      for (let i = 1; i <= SEQ_STEPS; i++) c.state[`_t${i}`] = false;
+      return;
+    }
     for (let i = 1; i <= SEQ_STEPS; i++) {
       const hi = c.high(`t${i}`);
       if (hi && !c.state[`_t${i}`] && i - 1 > (c.state.idx as number)) c.state.idx = i - 1;
@@ -181,6 +195,7 @@ const sequence: ComponentDef = {
   },
   evaluate: (c) => {
     if (!powered(c)) return;
+    c.state._pwr = true;
     c.energize(`s${(c.state.idx as number) + 1}`, c.energized("vp"));
   },
   draw: (d) => {
