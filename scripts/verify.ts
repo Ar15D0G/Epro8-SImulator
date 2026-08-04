@@ -629,9 +629,15 @@ function fmtList(bad: string[]): string {
   const trig = place(doc, "switch");
   wire(doc, bat, "p1", trig, "a");
   wire(doc, trig, "b", seq, "t3");
+  const t1 = place(doc, "switch");
+  wire(doc, bat, "p1", t1, "a");
+  wire(doc, t1, "b", seq, "t1");
+  /** No step output at all is being driven. */
+  const idleOut = () => [1, 2, 3, 4].every((n) => sim.energizedAt(seq.id, `s${n}`) < 0.5);
 
   run(doc, sim);
-  check("Sequencer starts on step 1", seq.state!.idx === 0);
+  check("Sequencer starts idle, before step 1", seq.state!.idx === -1);
+  check("An idle sequencer drives no step output", idleOut());
   trig.state!.closed = true;
   run(doc, sim);
   check("Sequencer advances to the triggered step", seq.state!.idx === 2);
@@ -650,11 +656,17 @@ function fmtList(bad: string[]): string {
 
   bat.state!.on = false;
   run(doc, sim);
-  check("Sequencer resets when the battery is switched off", seq.state!.idx === 0);
+  check("Sequencer resets to idle when the battery is switched off", seq.state!.idx === -1);
   bat.state!.on = true;
   run(doc, sim);
-  check("Sequencer comes back on step 1, not where it left off", seq.state!.idx === 0);
-  check("Step 1 drives its output again after the reset", sim.energizedAt(seq.id, "s1") > 0.5);
+  check("Sequencer comes back idle, not on the step it left off", seq.state!.idx === -1);
+  check("Sequencer comes back idle, not restarted on step 1", seq.state!.idx !== 0 && idleOut());
+
+  // and from idle it waits on T1 — the run only begins when the player says so
+  t1.state!.closed = true;
+  run(doc, sim);
+  check("T1 starts the run from idle", seq.state!.idx === 0);
+  check("Step 1 drives its output once triggered", sim.energizedAt(seq.id, "s1") > 0.5);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

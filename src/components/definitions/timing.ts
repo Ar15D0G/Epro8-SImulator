@@ -147,6 +147,8 @@ const counter: ComponentDef = {
 
 // ── Sequencer ────────────────────────────────────────────────────────────────
 const SEQ_STEPS = 4;
+/** Armed but not running: no step lamp lit, no step output driven, waiting on T1. */
+const SEQ_IDLE = -1;
 const SEQ_W = 150;
 const seqRowY = (i: number) => 48 + i * 26; // rows: 48, 74, 100, 126 (tighter → near-square)
 const SEQ_H = seqRowY(SEQ_STEPS - 1) + 42; // 168 — extra bottom room so the power row clears the step labels
@@ -166,14 +168,15 @@ const sequence: ComponentDef = {
   short: "SEQUENCE",
   category: "timing",
   description:
-    "4-step sequencer. Left = triggers (plug a button/signal in), right = step outputs (drive a motor etc.). Step 1 runs at power-up; signalling a trigger switches to that step and stops the previous step's action. Switching the power off resets it back to step 1. Needs + / − power.",
+    "4-step sequencer. Left = triggers (plug a button/signal in), right = step outputs (drive a motor etc.). It starts idle — no step running — and waits for T1; signalling a trigger switches to that step and stops the previous step's action. Switching the power off drops it all the way back to idle, waiting on T1 again. Needs + / − power.",
   w: SEQ_W,
   h: SEQ_H,
   pins: seqPins,
-  init: () => ({ idx: 0, _pwr: false, _t1: false, _t2: false, _t3: false, _t4: false }),
+  init: () => ({ idx: SEQ_IDLE, _pwr: false, _t1: false, _t2: false, _t3: false, _t4: false }),
   tick: (c) => {
-    // Losing power resets the run — switch the battery off and back on and the
-    // box starts from step 1 again rather than resuming where it left off.
+    // Losing power drops the run all the way back to idle — switch the battery
+    // off and the box forgets where it was and sits waiting on T1 again, as it
+    // does when first placed. It never resumes, and never restarts on its own.
     //
     // `_pwr` is what `evaluate` settled on last frame, not a fresh reading:
     // `tick` only ever sees the *previous* frame's energisation, which reads as
@@ -183,7 +186,7 @@ const sequence: ComponentDef = {
     const wasPowered = c.state._pwr as boolean;
     c.state._pwr = false; // `evaluate` re-latches it once this frame settles
     if (!wasPowered) {
-      c.state.idx = 0;
+      c.state.idx = SEQ_IDLE;
       for (let i = 1; i <= SEQ_STEPS; i++) c.state[`_t${i}`] = false;
       return;
     }
@@ -196,15 +199,28 @@ const sequence: ComponentDef = {
   evaluate: (c) => {
     if (!powered(c)) return;
     c.state._pwr = true;
-    c.energize(`s${(c.state.idx as number) + 1}`, c.energized("vp"));
+    const idx = c.state.idx as number;
+    if (idx === SEQ_IDLE) return; // idle: powered, but driving no step
+    c.energize(`s${idx + 1}`, c.energized("vp"));
   },
   draw: (d) => {
     const idx = d.state.idx as number;
     const { ctx, w } = d;
     text(ctx, "TRIG", 20, 26, "#0c2f14", 8, 700);
     text(ctx, "STEP", w - 20, 26, "#0c2f14", 8, 700);
+    // Idle and powered looks the same as idle and dead unless we say so: the
+    // top lamp gets a slow halo to show the box is armed and waiting on T1.
+    const armed = idx === SEQ_IDLE && (d.state._pwr as boolean);
     for (let i = 0; i < SEQ_STEPS; i++) {
       const y = seqRowY(i);
+      if (armed && i === 0) {
+        const pulse = 0.5 + 0.5 * Math.sin(d.time * 3);
+        ctx.beginPath();
+        ctx.arc(w / 2, y, 9.5, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(253,224,71,${0.2 + 0.35 * pulse})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
       ctx.beginPath();
       ctx.arc(w / 2, y, 6, 0, Math.PI * 2);
       ctx.fillStyle = i === idx ? "#fde047" : INK;
