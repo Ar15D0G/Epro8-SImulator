@@ -667,6 +667,46 @@ function fmtList(bad: string[]): string {
   run(doc, sim);
   check("T1 starts the run from idle", seq.state!.idx === 0);
   check("Step 1 drives its output once triggered", sim.energizedAt(seq.id, "s1") > 0.5);
+
+  // A trigger still held as the power returns was never *pressed* since the
+  // reset — a latched switch left closed must not fire step 1 on power-up.
+  bat.state!.on = false;
+  run(doc, sim);
+  bat.state!.on = true;
+  run(doc, sim);
+  check("A trigger held across the power cycle does not start the run",
+    seq.state!.idx === -1 && idleOut());
+  run(doc, sim, 120); // and it keeps waiting, however long the switch stays shut
+  check("A held trigger still does not start it later", seq.state!.idx === -1);
+  t1.state!.closed = false;
+  run(doc, sim);
+  check("Releasing the held trigger still does not start it", seq.state!.idx === -1);
+  t1.state!.closed = true;
+  run(doc, sim);
+  check("Pressing T1 afresh starts the run", seq.state!.idx === 0);
+}
+
+// 14b. every way of holding T1 high through a power cycle leaves it idle
+{
+  for (const held of ["a latched switch left closed", "T1 wired straight to +"] as const) {
+    const doc = emptyDoc(); const sim = new Simulator();
+    const bat = place(doc, "battery");
+    const seq = place(doc, "sequence");
+    power(doc, bat, seq);
+    if (held === "T1 wired straight to +") {
+      wire(doc, bat, "p1", seq, "t1");
+    } else {
+      const sw = place(doc, "switch");
+      wire(doc, bat, "p1", sw, "a");
+      wire(doc, sw, "b", seq, "t1");
+      sw.state!.closed = true;
+    }
+    run(doc, sim);
+    check(`Placed with ${held}: still idle`, seq.state!.idx === -1);
+    bat.state!.on = false; run(doc, sim);
+    bat.state!.on = true; run(doc, sim);
+    check(`Power-cycled with ${held}: still idle`, seq.state!.idx === -1);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

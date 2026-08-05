@@ -168,11 +168,11 @@ const sequence: ComponentDef = {
   short: "SEQUENCE",
   category: "timing",
   description:
-    "4-step sequencer. Left = triggers (plug a button/signal in), right = step outputs (drive a motor etc.). It starts idle — no step running — and waits for T1; signalling a trigger switches to that step and stops the previous step's action. Switching the power off drops it all the way back to idle, waiting on T1 again. Needs + / − power.",
+    "4-step sequencer. Left = triggers (plug a button/signal in), right = step outputs (drive a motor etc.). It starts idle — no step running — and waits for T1 to be pressed; signalling a trigger switches to that step and stops the previous step's action. Switching the power off drops it all the way back to idle, and it stays there until a trigger is pressed afresh — a switch left closed across the power cycle won't start it. Needs + / − power.",
   w: SEQ_W,
   h: SEQ_H,
   pins: seqPins,
-  init: () => ({ idx: SEQ_IDLE, _pwr: false, _t1: false, _t2: false, _t3: false, _t4: false }),
+  init: () => ({ idx: SEQ_IDLE, _pwr: false, _t1: true, _t2: true, _t3: true, _t4: true }),
   tick: (c) => {
     // Losing power drops the run all the way back to idle — switch the battery
     // off and the box forgets where it was and sits waiting on T1 again, as it
@@ -187,7 +187,13 @@ const sequence: ComponentDef = {
     c.state._pwr = false; // `evaluate` re-latches it once this frame settles
     if (!wasPowered) {
       c.state.idx = SEQ_IDLE;
-      for (let i = 1; i <= SEQ_STEPS; i++) c.state[`_t${i}`] = false;
+      // Every trigger is marked *already seen*, not cleared. A trigger that is
+      // still being held as the power comes back — a latched switch left closed,
+      // a limit switch resting on its lever — has not been pressed since the
+      // reset, and clearing the flags would let that standing signal read as a
+      // fresh press and fire step 1 the instant the battery came on. Only a real
+      // low-to-high edge, i.e. letting go and pressing again, starts the run.
+      for (let i = 1; i <= SEQ_STEPS; i++) c.state[`_t${i}`] = true;
       return;
     }
     for (let i = 1; i <= SEQ_STEPS; i++) {
