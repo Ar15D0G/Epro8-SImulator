@@ -229,6 +229,117 @@ const fan: ComponentDef = {
   },
 };
 
+// Square footprint with just two leads: the blue signal that switches it on and
+// the black − return back to the battery.
+const PUMP_SIZE = 96;
+const pumpPins: PinDef[] = [
+  { id: "in", role: "in", x: PUMP_SIZE / 2 - 18, y: PUMP_SIZE - 12, label: "SIG", color: SOCKET.sig },
+  { id: "n", role: "in", x: PUMP_SIZE / 2 + 18, y: PUMP_SIZE - 12, label: "−", color: SOCKET.neg },
+];
+const airpump: ComponentDef = {
+  id: "airpump",
+  name: "Air Pump",
+  short: "AIR PUMP",
+  category: "output",
+  description:
+    "Pumps air out of its nozzle while it is signalled. Wire the blue signal cable to whatever should switch it on and the black − back to the battery −; like any load it needs both, and it pumps faster the harder it is driven.",
+  w: PUMP_SIZE,
+  h: PUMP_SIZE,
+  pins: pumpPins,
+  init: () => ({ on: 0, phase: 0 }),
+  evaluate: (c) => {
+    c.state.on = loadLevel(c, "in", "n");
+  },
+  tick: (c, dt) => {
+    // one full piston stroke per cycle; a weaker signal pumps slower
+    c.state.phase = ((c.state.phase as number) + (c.state.on as number) * dt * 2.5) % 1;
+  },
+  draw: (d) => {
+    const on = d.state.on as number;
+    const ph = d.state.phase as number;
+    const { ctx, cx, cy } = d;
+    const bodyL = cx - 32;
+    const bodyR = cx + 10;
+    const bodyT = cy - 14;
+    const bodyB = cy + 16;
+    const ny = cy + 1; // centre line of the bore, the nozzle and the crank
+
+    // crank wheel driving the piston, off the left end of the barrel
+    const hub = cx - 36;
+    ctx.beginPath();
+    ctx.arc(hub, ny, 7, 0, Math.PI * 2);
+    ctx.fillStyle = on > 0.02 ? "#5b6167" : "#4b5157";
+    ctx.fill();
+    ctx.strokeStyle = "#2a2e33";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // crank pin, so the wheel is visibly turning
+    const a = ph * Math.PI * 2;
+    ctx.beginPath();
+    ctx.arc(hub + Math.cos(a) * 4, ny + Math.sin(a) * 4, 2, 0, Math.PI * 2);
+    ctx.fillStyle = on > 0.02 ? "#fde047" : "#8a9096";
+    ctx.fill();
+
+    // pump barrel
+    const bg = ctx.createLinearGradient(0, bodyT, 0, bodyB);
+    bg.addColorStop(0, "#b9bfc4");
+    bg.addColorStop(0.55, "#767c82");
+    bg.addColorStop(1, "#3c4147");
+    roundRect(ctx, bodyL, bodyT, bodyR - bodyL, bodyB - bodyT, 6);
+    ctx.fillStyle = bg;
+    ctx.fill();
+    ctx.strokeStyle = "#2a2e33";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // the bore, with the piston stroking along it
+    const boreL = bodyL + 5;
+    const boreR = bodyR - 5;
+    roundRect(ctx, boreL, ny - 8, boreR - boreL, 16, 3);
+    ctx.fillStyle = "#171b20";
+    ctx.fill();
+    const stroke = on > 0.02 ? (1 - Math.cos(a)) / 2 : 0; // parked back while off
+    const pistonX = boreL + 2 + stroke * (boreR - boreL - 13);
+    // connecting rod from the crank into the piston head
+    ctx.strokeStyle = "#8a9096";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(hub, ny);
+    ctx.lineTo(pistonX + 4, ny);
+    ctx.stroke();
+    roundRect(ctx, pistonX, ny - 6, 9, 12, 2);
+    ctx.fillStyle = "#dfe3e6";
+    ctx.fill();
+    ctx.strokeStyle = "#2a2e33";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // outlet nozzle on the right
+    ctx.fillStyle = "#4b5157";
+    ctx.fillRect(bodyR - 2, ny - 5, 12, 10);
+    roundRect(ctx, bodyR + 9, ny - 4, 6, 8, 2);
+    ctx.fillStyle = "#8a9096";
+    ctx.fill();
+    const tip = bodyR + 16;
+
+    // puffs of air leaving the nozzle, fading as they travel
+    if (on > 0.02) {
+      ctx.lineCap = "round";
+      for (let i = 0; i < 3; i++) {
+        const t = (ph + i / 3) % 1;
+        ctx.globalAlpha = Math.min(1, on) * (1 - t) * 0.9;
+        ctx.strokeStyle = "#dbeafe";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(tip, ny, 3 + t * 13, -0.75, 0.75);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      glow(ctx, tip + 6, ny, 18, "rgba(200,230,255,0.55)", Math.min(1, on) * 0.35);
+    }
+  },
+};
+
 const meterBox = box([
   { id: "p", kind: "p+", label: "+" }, // red probe
   { id: "n", kind: "p-", label: "−" }, // black probe
@@ -429,4 +540,4 @@ const direction: ComponentDef = {
   },
 };
 
-export const outputDefs: ComponentDef[] = [light, buzzer, motor, fan, ram, voltmeter, direction];
+export const outputDefs: ComponentDef[] = [light, buzzer, motor, fan, airpump, ram, voltmeter, direction];
